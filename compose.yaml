@@ -1,0 +1,145 @@
+version: '3.8'
+name: td-pretix-nuxt-compose
+
+services:
+  traefik:
+    image: traefik:v2.9
+    container_name: traefik_proxy
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
+      - "--certificatesresolvers.myresolver.acme.tlschallenge=true"
+      - "--certificatesresolvers.myresolver.acme.email=${ACME_EMAIL}"
+      - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./letsencrypt:/letsencrypt
+    networks:
+      - web
+    restart: unless-stopped
+
+  frontend:
+    image: carlegge/td-nuxt-frontend:latest
+    container_name: nuxt_frontend
+    environment:
+      - HOST=0.0.0.0
+      - PORT=3000
+      - NODE_ENV=production
+      - NUXT_PUBLIC_PRETIX_LOCAL_BASE_URL=${NUXT_PUBLIC_PRETIX_LOCAL_BASE_URL}
+      - NUXT_PUBLIC_PRETIX_BASE_URL=${NUXT_PUBLIC_PRETIX_BASE_URL}
+      - NUXT_PUBLIC_PRETIX_API_ENDPOINT=${NUXT_PUBLIC_PRETIX_API_ENDPOINT}
+      - NUXT_PRETIX_API_KEY=${NUXT_PRETIX_API_KEY}
+    networks:
+      - web
+      - internal
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=Host(`${FRONTEND_DOMAIN}`)"
+      - "traefik.http.routers.frontend.entrypoints=websecure"
+      - "traefik.http.routers.frontend.tls.certresolver=myresolver"
+      - "traefik.http.services.frontend.loadbalancer.server.port=3000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 30s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  backend:
+    image: carlegge/td-pretix:latest
+    container_name: pretix_backend
+    env_file: .env
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@database:5432/${POSTGRES_DB}
+      - REDIS_URL=redis://cache:6379
+      - SECRET_KEY=${BACKEND_SECRET_KEY}
+      - AUTOMIGRATE=skip
+    command: >
+      sh -c "
+        chmod 600 /etc/pretix/pretix.cfg &&
+        pretix web
+      "
+    depends_on:
+      - database
+      - cache
+    volumes:
+      - pretix_data:/data
+      - ./pretix.cfg:/etc/pretix/pretix.cfg
+    networks:
+      - web
+      - internal
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.backend.rule=Host(`${BACKEND_DOMAIN}`)"
+      - "traefik.http.routers.backend.entrypoints=websecure"
+      - "traefik.http.routers.backend.tls.certresolver=myresolver"
+      - "traefik.http.services.backend.loadbalancer.server.port=8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+  database:
+    image: postgres:15
+    container_name: database
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - internal
+    restart: unless-stopped
+
+  cache:
+    image: redis:7
+    container_name: redis
+    networks:
+      - internal
+    restart: unless-stopped
+
+  postfix:
+    image: catatnight/postfix
+    container_name: postfix
+    environment:
+      - maildomain=${POSTFIX_MAILDOMAIN}
+      - smtp_user=${POSTFIX_SMTP_USER}
+    networks:
+      - internal
+    restart: unless-stopped
+
+  cron:
+    image: carlegge/td-pretix:latest
+    container_name: pretix_cron
+    command: ["sh", "-c", "while true; do pretix cron; sleep 300; done"]
+    depends_on:
+      - backend
+    volumes:
+      - pretix_data:/data
+      - ./pretix.cfg:/etc/pretix/pretix.cfg
+    networks:
+      - internal
+    restart: unless-stopped
+
+networks:
+  web:
+    external: true
+  internal:
+
+volumes:
+  postgres_data:
+  pretix_data:
+  letsencrypt:
