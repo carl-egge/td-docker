@@ -1,6 +1,6 @@
 ## Theatedeck Compose Application
 
-### Python/Flask application using a Redis database
+### Custom Pretix application using Pyhton/Django and Nuxt 3 Frontend
 
 Project structure:
 
@@ -17,15 +17,15 @@ Project structure:
 ```
 $ docker compose up -d
 [+] Running 24/24
- ⠿ redis Pulled
+ ⠿ cache Pulled
  ...
    ⠿ 565225d89260 Pull complete
 [+] Building 12.7s (10/10) FINISHED
  => [internal] load build definition from Dockerfile                                                                                                                                                                                  ...
-[+] Running 3/3
- ⠿ Network td-docker_default    Created
- ⠿ Container td-pretix-redis-1  Started
- ⠿ Container td-pretix-web-1    Started
+[+] Running 7/7
+ ⠿ Container backend      Created
+ ⠿ Container traefik      Started
+ ⠿ Container database     Started
 ```
 
 ## Expected result
